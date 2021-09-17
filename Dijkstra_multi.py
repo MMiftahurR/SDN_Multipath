@@ -64,19 +64,6 @@ class ProjectController(app_manager.RyuApp):
         self.collector = '127.0.0.1'
 	self.sleeptime = 5
 
-    # Sflow Function
-    #def getIfInfo(self,ip):
-        '''
-        Get interface name of ip address (collector)
-        '''
-        #s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        #s.connect((ip, 0))
-        #ip = s.getsockname()[0]
-        #ifconfig = check_output(['ifconfig'])
-        #ifs = re.findall(r'^(\S+).*?inet (\S+).*?', ifconfig, re.S | re.M)
-        #for entry in ifs:
-         #   if entry[1] == ip:
-          #      return entry
 
     def init_sflow(self):
         '''
@@ -86,9 +73,7 @@ class ProjectController(app_manager.RyuApp):
         out = check_output(cmd)
         info = re.findall('(\d+): ((s[0-9]+)-eth([0-9]+))', out)
 
-        #sflow = 'ovs-vsctl -- --id=@sflow create sflow agent=%s target=\\"%s\\" sampling=%s polling=%s --' % (
-         #   ifname, collector, sampling, polling)
-
+	#Insert Switch tag in to a list
         for ifindex, ifname, switch, port in info:
             if int(switch[1:]) in self.switches:
                 self.switches[int(switch[1:])]['ports'][int(port)] = {
@@ -96,11 +81,6 @@ class ProjectController(app_manager.RyuApp):
                     'ifname': ifname,
                     'bandwidth': 0
                 }
-                #sflow += ' -- set bridge %s sflow=@sflow' % switch
-
-        #print sflow
-        # os.system('echo %s|sudo -S %s' % (sudoPassword, sflow))
-        #os.system(sflow)
 
         hub.spawn_after(0.1, self.monitor_inc)
 
@@ -122,10 +102,12 @@ class ProjectController(app_manager.RyuApp):
                               '.ifinoctets/json'
                     r2 = get(url2)
                     response2 = r2.json()
+			
+		    #get biggest traffic number in a path
 		    self.inc[first_port][last_port] = max((response1[0]['metricValue'] * 8),(response2[0]['metricValue'] * 8))
-		    #print "incoming traffic ",src,first_port," ",dst,last_port," is ",self.inc[first_port][last_port]
+
                     try:
-                        #update
+                        #update the use path, 65535 = no change, 1 = to multipath, 0 = to singlepath
 			update = 65535
 			inc_before = self.inc[first_port][last_port]
 			dp = self.datapath_list[src]
@@ -145,7 +127,7 @@ class ProjectController(app_manager.RyuApp):
                         	      '.ifoututilization/json'
 				r = get(url)
                     		response = r.json()
-				#print dp,port," utilization is ",response[0]['metricValue']
+				
 				self.util[port] = (response[0]['metricValue'] * weight)
 				free_band = weight - self.util[port]
 				free_band_sum += free_band
@@ -156,36 +138,17 @@ class ProjectController(app_manager.RyuApp):
 			if self.inc[first_port][last_port] > (pw[0] * 0.8):
 				if self.routing[ip_src][ip_dst] == 0:
 					update = 1
-				#elif traffic_jump > 10000000:
-				#	update = 1
-				#elif traffic_jump < 10000000:
-				#	update = 65535
-				#	if max_free > 10000000:
-				#		update = 1 
-			#elif self.routing[ip_src][ip_dst] == 1:
-			#	update = 0
-				#self.sleeptime = 3
-			#elif self.sleeptime > 10:
-			#	update = 65535
-			#	print "5 seconds idle"
-			#	self.sleeptime = 3
+				
 			elif self.inc[first_port][last_port] < max_free:
 				update = 0
 				if self.routing[ip_src][ip_dst] == 0:
-				#	self.sleeptime = 3
 					update = 65535
-				#else :
-				#	self.sleeptime = 3
 			elif self.inc[first_port][last_port] > max_free:
 				update = 1
 				if self.routing[ip_src][ip_dst] == 1:
-				#	self.sleeptime = 3
 					update = 65535
-				#else :
-				#	self.sleeptime = 3
  
-			#print "group id:",first_port,last_port,group_id
-                        #print "incoming traffic: ",self.inc
+                        #update the bucket weight
 			buckets = []
 			if update == 1:
 				print "update weight for multipath routing"
@@ -224,17 +187,12 @@ class ProjectController(app_manager.RyuApp):
                         	req = ofp_parser.OFPGroupMod(dp, ofp.OFPGC_MODIFY, ofp.OFPGT_SELECT,group_id, buckets)
                         	dp.send_msg(req)
 				self.routing[ip_src][ip_dst] = 0	
-				#print "update weight for singlepath routing"
-			#else:
-				#print "no update between s",src," port ",first_port," s ",dst," port ",last_port
 
                     except KeyError:
                         pass
-                          #print switch,thr[switch]
             except RuntimeError:
                 pass
             hub.sleep(3)
-    # End Sflow
 
     def convert(self, val):
         lookup = {'G': 1000000000, 'M': 1000000}
@@ -586,7 +544,6 @@ class ProjectController(app_manager.RyuApp):
                     out_port = self.install_paths(h1[0], h1[1], h2[0], h2[1], src_ip, dst_ip)
                     self.install_paths(h2[0], h2[1], h1[0], h1[1], dst_ip, src_ip) # reverse
 
-        # print pkt
 
         actions = [parser.OFPActionOutput(out_port)]
 
@@ -612,13 +569,6 @@ class ProjectController(app_manager.RyuApp):
             req = ofp_parser.OFPPortDescStatsRequest(switch)
             switch.send_msg(req)
 	    self.init_sflow()
-
-        #if self.switches:
-            #(ifname, agent) = self.getIfInfo(self.collector)
-            #ifname = ifname.replace(":","")
-            #logging.getLogger("requests").setLevel(logging.WARNING)
-            #logging.getLogger("urllib3").setLevel(logging.WARNING)
-            #self.init_sflow(ifname, self.collector, 10, 10)
 
     @set_ev_cls(event.EventSwitchLeave, MAIN_DISPATCHER)
     def switch_leave_handler(self, ev):
